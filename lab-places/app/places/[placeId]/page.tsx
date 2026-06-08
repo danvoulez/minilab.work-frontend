@@ -3,12 +3,109 @@ import Link from 'next/link';
 import { queryClient } from '@/lib/query-client';
 import { StatusChip } from '@/components/StatusChip';
 import { ObservabilityList } from '@/components/shell/ObservabilityList';
-import { ActionStrip } from '@/components/shell/ActionStrip';
-import { AlertTriangle, ArrowLeft, MessageSquare } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, ArrowRight, MessageSquare } from 'lucide-react';
 import type { ObsItem } from '@/components/shell/ObservabilityList';
+import type { ActionItem } from '@/lib/types';
 
 interface Props {
   params: Promise<{ placeId: string }>;
+}
+
+// Three fixed action slots under the hero. Real actions fill from the left;
+// remaining slots render as honest "Soon" placeholders instead of vanishing,
+// so every place reads as a consistent 3-up command row.
+function ActionSlots({
+  actions,
+  accentColor,
+  agentHref,
+}: {
+  actions: ActionItem[];
+  accentColor: string;
+  agentHref: string;
+}) {
+  const slots = [0, 1, 2].map((i) => actions[i] ?? null);
+
+  return (
+    <div>
+      <p className="text-[9px] font-bold uppercase tracking-[0.15em] text-white/28 mb-1.5">Actions</p>
+      <div className="grid grid-cols-3 gap-2">
+        {slots.map((action, i) => {
+          if (!action) {
+            return (
+              <div
+                key={`empty-${i}`}
+                className="flex flex-col justify-between min-h-[78px] rounded-xl border border-white/[0.06] bg-white/[0.015] p-3"
+              >
+                <span className="text-[12px] font-semibold leading-snug text-white/25">Soon</span>
+                <span className="mt-auto pt-2 text-[8px] font-bold uppercase tracking-[0.14em] text-white/18">
+                  slot
+                </span>
+              </div>
+            );
+          }
+
+          const isPrimary = action.variant === 'primary';
+          const isDanger = action.variant === 'danger';
+          const isAgentAction = !action.href && !action.disabled;
+          const href =
+            action.href ?? (isAgentAction ? `${agentHref}?q=${encodeURIComponent(action.label)}` : undefined);
+
+          const accentStyle =
+            isPrimary && accentColor
+              ? {
+                  background: `linear-gradient(148deg, ${accentColor}55 0%, ${accentColor}2a 100%)`,
+                  borderColor: `${accentColor}55`,
+                }
+              : undefined;
+
+          const cardCls = [
+            'flex flex-col justify-between min-h-[78px] rounded-xl border p-3 transition-all duration-150 active:scale-[0.97]',
+            isPrimary
+              ? 'bg-white/[0.06] border-white/[0.15] hover:bg-white/10'
+              : isDanger
+              ? 'bg-red-500/[0.06] border-red-500/20 hover:bg-red-500/10'
+              : 'bg-white/[0.03] border-white/[0.07] hover:bg-white/[0.06]',
+          ].join(' ');
+
+          const labelCls = `text-[12px] font-semibold leading-snug ${
+            isPrimary ? 'text-white' : isDanger ? 'text-red-300' : 'text-white/65'
+          }`;
+
+          const footer = (
+            <div className="mt-auto pt-2 flex justify-end">
+              {isAgentAction ? (
+                <MessageSquare size={10} className="opacity-25" />
+              ) : href ? (
+                <ArrowRight size={10} className="opacity-25" />
+              ) : (
+                <span className="text-[8px] text-white/20 uppercase tracking-wider">soon</span>
+              )}
+            </div>
+          );
+
+          const inner = (
+            <>
+              <span className={`${labelCls} line-clamp-2`}>{action.label}</span>
+              {footer}
+            </>
+          );
+
+          if (href) {
+            return (
+              <Link key={action.id} href={href} className={cardCls} style={accentStyle}>
+                {inner}
+              </Link>
+            );
+          }
+          return (
+            <div key={action.id} className={`${cardCls} opacity-40 cursor-not-allowed`}>
+              {inner}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
 }
 
 function AgentHero({ placeId, shortLabel, color }: { placeId: string; shortLabel: string; color: string }) {
@@ -51,29 +148,21 @@ export default async function PlacePage({ params }: Props) {
 
   const color = place.accentColor;
 
-  // statusLights → semaphore dots, no value needed (the dot IS the signal)
+  // statusLights → semaphore dots (the dot IS the signal)
   const readinessItems: ObsItem[] = place.statusLights.map((l) => ({
     label: l.label,
     status: l.status === 'on' ? 'ok' : l.status === 'warn' ? 'warn' : 'idle',
   }));
 
-  // primarySignals → key metrics, no status (grey dot)
+  // primarySignals → key metrics ("Runtime data: SOON", "Control plane: not wired", …)
   const signalItems: ObsItem[] = place.primarySignals.map((s) => ({
     label: s.label,
     value: s.value,
     note: s.note,
   }));
 
-  // panels (operational, have status) + deepDetails (informational, no status)
-  const obsGroups: { title: string; items: ObsItem[] }[] = [
-    ...(readinessItems.length > 0 ? [{ title: 'Readiness', items: readinessItems }] : []),
-    ...(signalItems.length > 0    ? [{ title: 'Key Signals', items: signalItems }]  : []),
-    ...place.panels.map((p) => ({ title: p.title, items: p.items })),
-    ...place.deepDetails.map((d) => ({
-      title: d.title,
-      items: d.rows.map((r) => ({ label: r.label, value: r.value, note: r.note })),
-    })),
-  ];
+  // One small list: lead with the honest signals, top up with readiness lights, cap at 4.
+  const obsItems: ObsItem[] = [...signalItems, ...readinessItems].slice(0, 4);
 
   return (
     <div className="min-h-[100svh] bg-[#0e0e0e] flex flex-col">
@@ -122,7 +211,7 @@ export default async function PlacePage({ params }: Props) {
       <div className="relative z-10 flex-1 overflow-y-auto" style={{ scrollbarWidth: 'none' }}>
         <div className="max-w-[440px] mx-auto px-4 py-4 space-y-3 pb-10">
 
-          {/* Identity banner */}
+          {/* 1. Big square — identity banner */}
           <div
             className="rounded-2xl px-5 py-5 relative overflow-hidden"
             style={{
@@ -150,10 +239,18 @@ export default async function PlacePage({ params }: Props) {
             </p>
           </div>
 
-          {/* Agent hero */}
+          {/* 2. Three action slots */}
+          <ActionSlots actions={place.actions} accentColor={color} agentHref={`/places/${placeId}/agent`} />
+
+          {/* 3. Talk to agent */}
           <AgentHero placeId={placeId} shortLabel={place.shortLabel} color={color} />
 
-          {/* Attention */}
+          {/* 4. Small observability — one compact list, 3–4 items */}
+          {obsItems.length > 0 && (
+            <ObservabilityList title="Observability" items={obsItems} />
+          )}
+
+          {/* Attention — the honest "not wired" notice */}
           {place.attention && (
             <div className="flex gap-3 p-3.5 rounded-xl bg-amber-500/[0.07] border border-amber-500/20">
               <AlertTriangle size={13} className="text-amber-400 flex-shrink-0 mt-0.5" />
@@ -165,25 +262,6 @@ export default async function PlacePage({ params }: Props) {
               </div>
             </div>
           )}
-
-          {/* Observability */}
-          {obsGroups.length > 0 && (
-            <div className="space-y-2.5">
-              <p className="text-[9px] font-bold uppercase tracking-[0.18em] text-white/20">
-                Observability
-              </p>
-              {obsGroups.map((g) => (
-                <ObservabilityList key={g.title} title={g.title} items={g.items} />
-              ))}
-            </div>
-          )}
-
-          {/* Actions */}
-          <ActionStrip
-            actions={place.actions}
-            accentColor={color}
-            agentHref={`/places/${placeId}/agent`}
-          />
 
           {/* Relations */}
           {place.relations.length > 0 && (
