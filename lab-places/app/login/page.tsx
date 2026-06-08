@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 
-type Mode = 'password' | 'magic'
+type Mode = 'password' | 'magic' | 'signup'
 
 export default function LoginPage() {
   const [mode, setMode] = useState<Mode>('password')
@@ -15,6 +15,9 @@ export default function LoginPage() {
   const [error, setError] = useState<string | null>(null)
   const [sent, setSent] = useState(false)
   const router = useRouter()
+
+  const isSignup = mode === 'signup'
+  const showPassword = mode === 'password' || mode === 'signup'
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -26,11 +29,23 @@ export default function LoginPage() {
       const { error } = await supabase.auth.signInWithPassword({ email, password })
       if (error) setError(error.message)
       else router.push('/')
-    } else {
+    } else if (mode === 'magic') {
       const { error } = await supabase.auth.signInWithOtp({
         email,
         options: {
           shouldCreateUser: false,
+          emailRedirectTo: `${window.location.origin}/auth/confirm`,
+        },
+      })
+      if (error) setError(error.message)
+      else setSent(true)
+    } else {
+      // signup — open self-registration. Email confirmation is required
+      // (mailer_autoconfirm is off), so the user lands on /auth/confirm.
+      const { error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
           emailRedirectTo: `${window.location.origin}/auth/confirm`,
         },
       })
@@ -66,8 +81,17 @@ export default function LoginPage() {
           <div className="rounded-2xl border border-white/[0.07] bg-white/[0.02] p-6 text-center space-y-2">
             <p className="text-sm font-semibold text-white">Check your email</p>
             <p className="text-xs text-white/40 leading-relaxed">
-              A magic link was sent to <span className="text-white/65">{email}</span>.
-              Click it to sign in — no password needed.
+              {isSignup ? (
+                <>
+                  A confirmation link was sent to <span className="text-white/65">{email}</span>.
+                  Click it to activate your account.
+                </>
+              ) : (
+                <>
+                  A magic link was sent to <span className="text-white/65">{email}</span>.
+                  Click it to sign in — no password needed.
+                </>
+              )}
             </p>
             <button
               onClick={() => { setSent(false); setMode('password') }}
@@ -78,23 +102,34 @@ export default function LoginPage() {
           </div>
         ) : (
           <form onSubmit={handleSubmit} className="rounded-2xl border border-white/[0.07] bg-white/[0.02] p-6 space-y-4">
-            {/* Mode toggle */}
-            <div className="flex rounded-lg border border-white/[0.07] overflow-hidden text-[11px] font-semibold">
-              {(['password', 'magic'] as const).map((m) => (
-                <button
-                  key={m}
-                  type="button"
-                  onClick={() => { setMode(m); setError(null) }}
-                  className={`flex-1 py-1.5 transition-colors ${
-                    mode === m
-                      ? 'bg-white/10 text-white'
-                      : 'text-white/30 hover:text-white/55'
-                  }`}
-                >
-                  {m === 'password' ? 'Password' : 'Magic link'}
-                </button>
-              ))}
-            </div>
+            {/* Mode toggle (sign-in only) */}
+            {!isSignup && (
+              <div className="flex rounded-lg border border-white/[0.07] overflow-hidden text-[11px] font-semibold">
+                {(['password', 'magic'] as const).map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => { setMode(m); setError(null) }}
+                    className={`flex-1 py-1.5 transition-colors ${
+                      mode === m
+                        ? 'bg-white/10 text-white'
+                        : 'text-white/30 hover:text-white/55'
+                    }`}
+                  >
+                    {m === 'password' ? 'Password' : 'Magic link'}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {isSignup && (
+              <div>
+                <p className="text-sm font-semibold text-white mb-0.5">Create your account</p>
+                <p className="text-[11px] text-white/35">
+                  Sign up with your email — we&apos;ll send a confirmation link.
+                </p>
+              </div>
+            )}
 
             {/* Email */}
             <div className="space-y-1.5">
@@ -112,29 +147,35 @@ export default function LoginPage() {
               />
             </div>
 
-            {/* Password (only in password mode) */}
-            {mode === 'password' && (
+            {/* Password (password sign-in + signup) */}
+            {showPassword && (
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
                   <label className="text-[10px] font-bold uppercase tracking-[0.12em] text-white/35">
                     Password
                   </label>
-                  <Link
-                    href="/auth/forgot-password"
-                    className="text-[10px] text-white/25 hover:text-white/50 transition-colors"
-                  >
-                    Forgot password?
-                  </Link>
+                  {!isSignup && (
+                    <Link
+                      href="/auth/forgot-password"
+                      className="text-[10px] text-white/25 hover:text-white/50 transition-colors"
+                    >
+                      Forgot password?
+                    </Link>
+                  )}
                 </div>
                 <input
                   type="password"
                   required
-                  autoComplete="current-password"
+                  minLength={isSignup ? 8 : undefined}
+                  autoComplete={isSignup ? 'new-password' : 'current-password'}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••"
                   className="w-full rounded-xl border border-white/[0.1] bg-white/[0.04] px-3.5 py-2.5 text-sm text-white placeholder-white/20 outline-none focus:border-white/25 focus:bg-white/[0.06] transition-colors"
                 />
+                {isSignup && (
+                  <p className="text-[10px] text-white/25">At least 8 characters.</p>
+                )}
               </div>
             )}
 
@@ -150,11 +191,40 @@ export default function LoginPage() {
               className="w-full rounded-xl bg-white py-2.5 text-sm font-bold text-[#0e0e0e] transition-opacity hover:opacity-90 disabled:opacity-40"
             >
               {loading
-                ? 'Signing in…'
+                ? 'Working…'
                 : mode === 'password'
                 ? 'Sign in'
-                : 'Send magic link'}
+                : mode === 'magic'
+                ? 'Send magic link'
+                : 'Create account'}
             </button>
+
+            {/* Sign-in <-> Sign-up toggle */}
+            <p className="text-center text-[11px] text-white/30">
+              {isSignup ? (
+                <>
+                  Already have an account?{' '}
+                  <button
+                    type="button"
+                    onClick={() => { setMode('password'); setError(null) }}
+                    className="font-semibold text-white/60 hover:text-white/90 transition-colors"
+                  >
+                    Sign in
+                  </button>
+                </>
+              ) : (
+                <>
+                  New to minilab?{' '}
+                  <button
+                    type="button"
+                    onClick={() => { setMode('signup'); setError(null) }}
+                    className="font-semibold text-white/60 hover:text-white/90 transition-colors"
+                  >
+                    Create an account
+                  </button>
+                </>
+              )}
+            </p>
           </form>
         )}
       </div>
