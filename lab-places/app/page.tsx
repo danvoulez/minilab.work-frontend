@@ -1,8 +1,51 @@
 import { PlaceGrid } from '@/components/PlaceGrid';
 import { queryClient } from '@/lib/query-client';
+import { createClient } from '@/lib/supabase/server';
+
+// Live read of the cockpit "today" summary straight from the Supabase source of
+// truth (audit.v_mobile_today, via the public.cockpit_today read surface).
+// Returns null on any failure so the UI degrades honestly instead of faking data.
+async function getToday() {
+  try {
+    const supabase = await createClient();
+    const { data, error } = await supabase.from('cockpit_today').select('*').single();
+    if (error) return null;
+    return data as Record<string, number>;
+  } catch {
+    return null;
+  }
+}
 
 export default async function Home() {
-  const summaries = await queryClient.listPlaces();
+  const [summaries, today] = await Promise.all([queryClient.listPlaces(), getToday()]);
+
+  const stats = today
+    ? ([
+        { label: 'Entities live', value: today.entities_active ?? 0, tone: 'good' as const },
+        { label: 'Acts · 24h', value: today.logline_acts_24h ?? 0, tone: 'plain' as const },
+        {
+          label: 'Unverified links',
+          value: today.unverified_links ?? 0,
+          tone: (today.unverified_links ?? 0) > 0 ? ('warn' as const) : ('plain' as const),
+        },
+        {
+          label: 'Open ghosts',
+          value: today.lab_ghosts_open ?? 0,
+          tone: (today.lab_ghosts_open ?? 0) > 0 ? ('warn' as const) : ('plain' as const),
+        },
+        {
+          label: 'Releases pending',
+          value: today.releases_pending ?? 0,
+          tone: (today.releases_pending ?? 0) > 0 ? ('warn' as const) : ('plain' as const),
+        },
+      ])
+    : [];
+
+  const valueTone = {
+    good: 'text-emerald-400',
+    warn: 'text-amber-400',
+    plain: 'text-white',
+  };
 
   return (
     <main className="min-h-screen bg-[#0e0e0e]">
@@ -34,6 +77,35 @@ export default async function Home() {
             </div>
           </div>
         </header>
+
+        {/* Live "today" strip — real numbers from minilab.database */}
+        {stats.length > 0 && (
+          <div className="flex-shrink-0 px-4 md:px-8 pb-4">
+            <div className="max-w-5xl mx-auto w-full">
+              <div className="flex items-center gap-1.5 mb-1.5">
+                <div className="w-1 h-1 rounded-full bg-emerald-400 shadow-[0_0_5px_rgba(52,211,153,0.7)]" />
+                <p className="text-[9px] font-bold uppercase tracking-[0.18em] text-white/30">
+                  Today · live from minilab.database
+                </p>
+              </div>
+              <div className="flex gap-2 overflow-x-auto pb-1" style={{ scrollbarWidth: 'none' }}>
+                {stats.map((s) => (
+                  <div
+                    key={s.label}
+                    className="flex-shrink-0 min-w-[92px] rounded-xl border border-white/[0.07] bg-white/[0.025] px-3 py-2.5"
+                  >
+                    <p className={`text-xl font-black tabular-nums leading-none ${valueTone[s.tone]}`}>
+                      {s.value}
+                    </p>
+                    <p className="text-[9px] font-bold uppercase tracking-[0.1em] text-white/30 mt-1.5 whitespace-nowrap">
+                      {s.label}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Grid */}
         <div className="flex-1 px-3 md:px-6 lg:px-8 pb-6 max-w-5xl mx-auto w-full">
